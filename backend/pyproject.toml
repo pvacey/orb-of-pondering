@@ -1,0 +1,12 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.123.5",
+    "python-dotenv>=1.2.1",
+    "strands-agents-tools>=0.2.16",
+    "strands-agents[gemini]>=1.18.0",
+]
