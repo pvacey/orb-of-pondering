@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
 	"math/rand"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -30,8 +33,21 @@ const header = `
 // A message to trigger a frame update
 type tickMsg time.Time
 
-// A message to signal the end of the consultation
-type consultationDoneMsg struct{}
+// A message with the answer from the cosmos
+type answerMsg struct{ answer string }
+
+// A message for when things go wrong
+type errMsg struct{ err error }
+
+// JSON struct for the request payload
+type questionPayload struct {
+	Question string `json:"question"`
+}
+
+// JSON structs for parsing the response
+type wisdomResponse struct {
+	Wisdom string `json:"wisdom"`
+}
 
 // The command to produce the tickMsg at a regular interval
 func tickCmd() tea.Cmd {
@@ -101,22 +117,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, textinput.Blink
 			} else if m.textInput.Value() != "" {
 				logToFile(m.textInput.Value())
-				m.answer = getAnswer()
 				m.thinking = true
 				m.textInput.Blur()
 				return m, tea.Batch(
 					tea.Tick(time.Second/10, func(t time.Time) tea.Msg { return spinner.TickMsg{} }),
-					tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
-						return consultationDoneMsg{}
-					}),
+					getAnswerCmd(m.textInput.Value()),
 				)
 			}
 		}
 
-	case consultationDoneMsg:
+	case answerMsg:
 		m.thinking = false
 		m.showingAnswer = true
+		m.answer = msg.answer
 		m.textInput.Reset()
+		return m, nil
+
+	case errMsg:
+		m.thinking = false
+		m.showingAnswer = true
+		m.answer = "The cosmos is silent. Your question remains unanswered."
+		m.textInput.Reset()
+		log.Printf("Error getting answer: %v", msg.err) // Log error
 		return m, nil
 
 	case tickMsg: // For orb animation
@@ -137,30 +159,43 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // --- View and Rendering Logic ---
 
-func getAnswer() string {
-	answers := []string{
-		"It is certain.",
-		"It is decidedly so.",
-		"Without a doubt.",
-		"Yes, definitely.",
-		"You may rely on it.",
-		"As I see it, yes.",
-		"Most likely.",
-		"Outlook good.",
-		"Yes.",
-		"Signs point to yes.",
-		"Reply hazy, try again.",
-		"Ask again later.",
-		"Better not tell you now.",
-		"Cannot predict now.",
-		"Concentrate and ask again.",
-		"Don't count on it.",
-		"My reply is no.",
-		"My sources say no.",
-		"Outlook not so good.",
-		"Very doubtful.",
+func getAnswerCmd(question string) tea.Cmd {
+	return func() tea.Msg {
+		answer, err := getAnswer(question)
+		if err != nil {
+			return errMsg{err}
+		}
+		return answerMsg{answer}
 	}
-	return answers[rand.Intn(len(answers))]
+}
+
+func getAnswer(question string) (string, error) {
+	payload := questionPayload{Question: question}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal question: %w", err)
+	}
+
+	resp, err := http.Post("https://orb.ponder.guru/", "application/json", bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return "", fmt.Errorf("failed to get wisdom: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("wisdom API returned non-200 status: %d", resp.StatusCode)
+	}
+
+	var wisdomResp wisdomResponse
+	if err := json.NewDecoder(resp.Body).Decode(&wisdomResp); err != nil {
+		return "", fmt.Errorf("failed to decode wisdom response: %w", err)
+	}
+
+	if wisdomResp.Wisdom != "" {
+		return wisdomResp.Wisdom, nil
+	}
+
+	return "", fmt.Errorf("wisdom not found in response")
 }
 
 func logToFile(text string) {
