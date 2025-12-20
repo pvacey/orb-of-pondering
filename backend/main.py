@@ -12,8 +12,7 @@ model = GeminiModel(
     client_args={
         "api_key": os.getenv("GEMINI_API_KEY")
     },
-    # **model_config
-    model_id="gemini-2.5-flash",
+    model_id="gemini-3-flash-preview",
     params={
         # some sample model parameters
         "temperature": 0.7,
@@ -25,12 +24,6 @@ model = GeminiModel(
 
 app = FastAPI()
 
-agent = Agent(model=model, system_prompt=(
-    "You are a mystical orb of pondering that people come to for wisdom. You will provide advice or insight that is deep and relfective but must be extremely concise. Sort of like a prophetic magic 8-ball or a chinese fortune cookie. a wise traveler of the silk road"
-),
-    callback_handler=None
-)
-
 
 class ReqResp(BaseModel):
     question: str
@@ -39,6 +32,11 @@ class ReqResp(BaseModel):
 
 @app.post("/")
 def invoked_cosmic_wisdom(r: ReqResp):
+    agent = Agent(model=model, system_prompt=(
+        "You are a mystical orb of pondering that people come to for wisdom. You will provide advice or insight that is deep and relfective but must be extremely concise. Sort of like a prophetic magic 8-ball or a chinese fortune cookie. a wise traveler of the silk road"
+    ),
+        callback_handler=None
+    )
     resp = agent(r.question)
     r.wisdom = resp.message['content'][0]['text']
     return r
