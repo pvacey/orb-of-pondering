@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"math"
@@ -17,6 +18,10 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/ssh"
+	"github.com/charmbracelet/wish"
+	"github.com/charmbracelet/wish/bubbletea"
+	"github.com/charmbracelet/wish/logging"
 )
 
 const header = `
@@ -66,6 +71,7 @@ type model struct {
 	thinking      bool
 	showingAnswer bool
 	answer        string
+	renderer      *lipgloss.Renderer
 }
 
 func initialModel() model {
@@ -265,7 +271,7 @@ func getColorSubtle(val float64, palette []lipgloss.Color) lipgloss.Color {
 	}
 }
 
-func applyGradient(text string, palette []lipgloss.Color, frame int) string {
+func applyGradient(text string, palette []lipgloss.Color, frame int, newStyle func() lipgloss.Style) string {
 	var builder strings.Builder
 
 	paletteSize := len(palette)
@@ -276,13 +282,13 @@ func applyGradient(text string, palette []lipgloss.Color, frame int) string {
 		paletteIndex := int(float64(i) / float64(textLength) * float64(paletteSize))
 		scrolledIndex := (paletteIndex + scrollOffset) % paletteSize
 		color := palette[scrolledIndex]
-		style := lipgloss.NewStyle().Foreground(color)
+		style := newStyle().Foreground(color)
 		builder.WriteString(style.Render(string(runeValue)))
 	}
 	return builder.String()
 }
 
-func renderOrbPixel(x, y, orbWidth, orbHeight, radius, frame int, palette []lipgloss.Color) string {
+func renderOrbPixel(x, y, orbWidth, orbHeight, radius, frame int, palette []lipgloss.Color, newStyle func() lipgloss.Style) string {
 	nx := float64(x) - float64(orbWidth)/2.0
 	ny := float64(y) - float64(orbHeight)/2.0
 
@@ -295,12 +301,16 @@ func renderOrbPixel(x, y, orbWidth, orbHeight, radius, frame int, palette []lipg
 		if dist > float64(radius)*0.9 {
 			color = darkestBlue
 		}
-		return lipgloss.NewStyle().Foreground(color).SetString("█").String()
+		return newStyle().Foreground(color).SetString("█").String()
 	}
 	return " "
 }
 
 func (m model) View() string {
+	newStyle := lipgloss.NewStyle
+	if m.renderer != nil {
+		newStyle = m.renderer.NewStyle
+	}
 	termWidth := m.width
 	if termWidth == 0 {
 		termWidth = 60
@@ -335,24 +345,24 @@ func (m model) View() string {
 	headerLines := strings.Split(header, "\n")
 	var styledHeaderLines []string
 	for _, line := range headerLines {
-		styledHeaderLines = append(styledHeaderLines, applyGradient(line, gradientPalette, m.frame))
+		styledHeaderLines = append(styledHeaderLines, applyGradient(line, gradientPalette, m.frame, newStyle))
 	}
 	headerView := lipgloss.JoinVertical(lipgloss.Left, styledHeaderLines...)
-	headerView = lipgloss.NewStyle().Width(termWidth).Align(lipgloss.Center).Render(headerView)
+	headerView = newStyle().Width(termWidth).Align(lipgloss.Center).Render(headerView)
 
 	// Interactive element setup
 	var interactiveElement string
 	if m.thinking {
 		spinnerView := m.spinner.View() + " consulting the cosmos..."
-		interactiveElement = lipgloss.NewStyle().Padding(1, 2).Render(spinnerView)
+		interactiveElement = newStyle().Padding(1, 2).Render(spinnerView)
 	} else if m.showingAnswer {
-		answerView := lipgloss.NewStyle().Padding(1, 2).Render(m.answer)
-		promptView := lipgloss.NewStyle().Padding(0, 2).Foreground(lipgloss.Color("240")).Render("Ask another question [enter]")
+		answerView := newStyle().Padding(1, 2).Render(m.answer)
+		promptView := newStyle().Padding(0, 2).Foreground(lipgloss.Color("240")).Render("Ask another question [enter]")
 		interactiveElement = lipgloss.JoinVertical(lipgloss.Center, answerView, promptView)
 	} else {
 		m.textInput.Width = orbWidth / 2
-		prompt := lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("#FFF")).Render("What is the knowledge you seek?")
-		inputBox := lipgloss.NewStyle().Padding(1, 3).Background(lipgloss.Color("#222")).Render(m.textInput.View())
+		prompt := newStyle().Padding(0, 1).Foreground(lipgloss.Color("#FFF")).Render("What is the knowledge you seek?")
+		inputBox := newStyle().Padding(1, 3).Background(lipgloss.Color("#222")).Render(m.textInput.View())
 		interactiveElement = lipgloss.JoinVertical(lipgloss.Center, prompt, inputBox)
 	}
 
@@ -370,18 +380,18 @@ func (m model) View() string {
 		if isTextBoxLine {
 			leftOrb := ""
 			for x := 0; x < textBoxStartX; x++ {
-				leftOrb += renderOrbPixel(x, y, orbWidth, orbHeight, radius, m.frame, palette)
+				leftOrb += renderOrbPixel(x, y, orbWidth, orbHeight, radius, m.frame, palette, newStyle)
 			}
 			textBoxLine := textBoxLines[y-textBoxStartY]
 			rightOrb := ""
 			for x := textBoxStartX + textBoxWidth; x < orbWidth; x++ {
-				rightOrb += renderOrbPixel(x, y, orbWidth, orbHeight, radius, m.frame, palette)
+				rightOrb += renderOrbPixel(x, y, orbWidth, orbHeight, radius, m.frame, palette, newStyle)
 			}
 			lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, leftOrb, textBoxLine, rightOrb))
 		} else {
 			line := ""
 			for x := 0; x < orbWidth; x++ {
-				line += renderOrbPixel(x, y, orbWidth, orbHeight, radius, m.frame, palette)
+				line += renderOrbPixel(x, y, orbWidth, orbHeight, radius, m.frame, palette, newStyle)
 			}
 			lines = append(lines, line)
 		}
@@ -389,17 +399,57 @@ func (m model) View() string {
 	ball := lipgloss.JoinVertical(lipgloss.Left, lines...)
 
 	// Instructions
-	instructions := lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render("\nPress Ctrl+C to quit.")
+	instructions := newStyle().Foreground(lipgloss.Color("#626262")).Render("\nPress Ctrl+C to quit.")
 
 	// Final layout
 	return lipgloss.JoinVertical(lipgloss.Left, headerView, ball, instructions)
 }
 
+func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
+	pty, _, active := s.Pty()
+	if !active {
+		wish.Fatalln(s, "no active PTY")
+		return nil, nil
+	}
+	renderer := bubbletea.MakeRenderer(s)
+	m := initialModel()
+	m.width = pty.Window.Width
+	m.height = pty.Window.Height
+	m.renderer = renderer
+	m.textInput.TextStyle = renderer.NewStyle().Foreground(lipgloss.Color("#FFF")).Background(lipgloss.Color("#222"))
+	m.spinner.Style = renderer.NewStyle().Foreground(lipgloss.Color("155"))
+	return m, []tea.ProgramOption{tea.WithAltScreen()}
+}
+
 func main() {
+	sshFlag := flag.Bool("ssh", false, "run as ssh server")
+	flag.Parse()
+
 	rand.Seed(time.Now().UnixNano())
-	p := tea.NewProgram(initialModel())
-	if _, err := p.Run(); err != nil {
-		fmt.Printf("Error running program: %v\n", err)
-		os.Exit(1)
+
+	if *sshFlag {
+		s, err := wish.NewServer(
+			wish.WithAddress(":2222"),
+			wish.WithHostKeyPath(".ssh/orb_host_key"),
+			wish.WithMiddleware(
+				bubbletea.Middleware(teaHandler),
+				logging.Middleware(),
+			),
+		)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		fmt.Println("starting ssh server on port 2222")
+		if err := s.ListenAndServe(); err != nil {
+			log.Fatalln(err)
+		}
+
+	} else {
+		p := tea.NewProgram(initialModel())
+		if _, err := p.Run(); err != nil {
+			fmt.Printf("Error running program: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
