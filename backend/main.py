@@ -33,12 +33,13 @@ class ReqResp(BaseModel):
 @app.post("/")
 def invoked_cosmic_wisdom(r: ReqResp):
     agent = Agent(model=model, system_prompt=(
-        "You are a mystical orb of pondering that people come to for wisdom. You will provide advice or insight that is deep and relfective but must be extremely concise. Sort of like a prophetic magic 8-ball or a chinese fortune cookie. a wise traveler of the silk road"
+        "You are a mystical orb of pondering that people come to for wisdom. You will provide advice or insight that is deep and relfective but must be extremely concise. Sort of like a prophetic magic 8-ball or a chinese fortune cookie. a wise guru giving spiritual guidance"
     ),
         callback_handler=None
     )
     resp = agent(r.question)
     r.wisdom = resp.message['content'][0]['text']
+    print(r)
     return r
 
 
