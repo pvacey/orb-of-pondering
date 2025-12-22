@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/bubbletea"
 	"github.com/charmbracelet/wish/logging"
+	"github.com/muesli/termenv"
 )
 
 const header = `
@@ -257,6 +258,9 @@ func hslToHex(h, s, l float64) string {
 // getColorSubtle returns a color from the palette based on an input value.
 func getColorSubtle(val float64, palette []lipgloss.Color) lipgloss.Color {
 	cycle := math.Mod(val, 1.0)
+	if cycle < 0 {
+		cycle += 1.0
+	}
 	switch {
 	case cycle < 0.2:
 		return palette[4]
@@ -412,6 +416,7 @@ func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
 		return nil, nil
 	}
 	renderer := bubbletea.MakeRenderer(s)
+	renderer.SetColorProfile(termenv.TrueColor)
 	m := initialModel()
 	m.width = pty.Window.Width
 	m.height = pty.Window.Height
