@@ -3,5 +3,5 @@
 A mesmerizing orb that allows the user to consult the wisdom of the cosmos in search of guidance. 
 
 ```shell
-ssh ponder.guru
+ssh orb.botched.tech
 ```
